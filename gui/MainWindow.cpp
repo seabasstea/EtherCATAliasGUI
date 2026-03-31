@@ -47,6 +47,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         m_adapterCombo = new QComboBox;
         m_adapterCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         row->addWidget(m_adapterCombo);
+        m_refreshAdapterBtn = new QPushButton(QStringLiteral("Refresh"));
+        m_refreshAdapterBtn->setFixedWidth(70);
+        row->addWidget(m_refreshAdapterBtn);
         m_scanBtn = new QPushButton(QStringLiteral("Scan"));
         m_scanBtn->setFixedWidth(80);
         row->addWidget(m_scanBtn);
@@ -132,6 +135,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_thread->start();
 
     // ---- Button connections ----
+    connect(m_refreshAdapterBtn, &QPushButton::clicked, this, &MainWindow::populateAdapters);
     connect(m_scanBtn,    &QPushButton::clicked, this, &MainWindow::onScanClicked);
     connect(m_writeBtn,   &QPushButton::clicked, this, &MainWindow::onWriteAliasClicked);
     connect(m_reloadBtn,  &QPushButton::clicked, this, &MainWindow::onReloadConfigClicked);

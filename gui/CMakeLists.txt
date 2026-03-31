@@ -13,7 +13,12 @@ set(SOURCES
     AliasConfig.cpp
 )
 
-qt_add_executable(EtherCATAliasGUI ${SOURCES})
+qt_add_executable(EtherCATAliasGUI WIN32 ${SOURCES})
+
+if(WIN32)
+    target_sources(EtherCATAliasGUI PRIVATE app.rc)
+    set_source_files_properties(app.rc PROPERTIES SKIP_AUTOMOC TRUE SKIP_AUTOUIC TRUE)
+endif()
 
 target_link_libraries(EtherCATAliasGUI PRIVATE soem Qt6::Widgets)
 
@@ -37,4 +42,27 @@ if(WIN32)
             COMMENT "Running windeployqt"
         )
     endif()
+endif()
+
+# ---- Install rules (used by CPack) ----
+install(TARGETS EtherCATAliasGUI RUNTIME DESTINATION . COMPONENT Runtime)
+install(FILES MK2_alias_config.json DESTINATION . COMPONENT Runtime)
+
+# Deploy Qt DLLs during install using Qt's built-in deploy script.
+# QT_DEPLOY_BIN_DIR defaults to "bin"; set it to "." first so DLLs
+# land next to the exe instead of a bin/ subdirectory.
+qt_generate_deploy_app_script(
+    TARGET EtherCATAliasGUI
+    OUTPUT_SCRIPT qt_deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(CODE "set(QT_DEPLOY_BIN_DIR \".\")" COMPONENT Runtime)
+install(SCRIPT ${qt_deploy_script} COMPONENT Runtime)
+
+# Install MinGW runtime DLLs (path derived from compiler location)
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    get_filename_component(MINGW_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
+    foreach(dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
+        install(FILES "${MINGW_BIN_DIR}/${dll}" DESTINATION . COMPONENT Runtime)
+    endforeach()
 endif()

@@ -42,8 +42,9 @@ private:
     QString selectedAdapterName() const;
 
     // Widgets
-    QComboBox      *m_adapterCombo  = nullptr;
-    QPushButton    *m_scanBtn       = nullptr;
+    QComboBox      *m_adapterCombo      = nullptr;
+    QPushButton    *m_refreshAdapterBtn = nullptr;
+    QPushButton    *m_scanBtn           = nullptr;
     QTableWidget   *m_table         = nullptr;
     QComboBox      *m_labelCombo    = nullptr;
     QLineEdit      *m_aliasEdit     = nullptr;
