@@ -30,6 +30,10 @@ private slots:
     void onLogMessage(const QString &message);
     void onTableSelectionChanged();
     void onLabelComboChanged(const QString &label);
+    void onTableContextMenu(const QPoint &pos);
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     void populateAdapters();

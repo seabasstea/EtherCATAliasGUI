@@ -5,13 +5,16 @@ extern "C" {
 }
 
 #include <QApplication>
+#include <QClipboard>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -66,6 +69,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
+    m_table->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_table, &QWidget::customContextMenuRequested,
+            this, &MainWindow::onTableContextMenu);
+    m_table->installEventFilter(this);
     root->addWidget(m_table, 1);
 
     // ---- Write alias group ----
@@ -165,16 +172,25 @@ void MainWindow::populateAdapters()
     ec_adaptert *head = ec_find_adapters();
     ec_adaptert *a = head;
     while (a) {
-        QString label = QStringLiteral("%1  (%2)").arg(
-            QString::fromLocal8Bit(a->name),
-            QString::fromLocal8Bit(a->desc));
-        m_adapterCombo->addItem(label, QString::fromLocal8Bit(a->name));
+        m_adapterCombo->addItem(
+            QString::fromLocal8Bit(a->desc),
+            QString::fromLocal8Bit(a->name));
         a = a->next;
     }
     ec_free_adapters(head);
 
-    if (m_adapterCombo->count() == 0)
+    if (m_adapterCombo->count() == 0) {
         onLogMessage(QStringLiteral("No network adapters found."));
+        return;
+    }
+
+    // Auto-select the first USB adapter if present
+    for (int i = 0; i < m_adapterCombo->count(); i++) {
+        if (m_adapterCombo->itemText(i).contains(QStringLiteral("USB"), Qt::CaseInsensitive)) {
+            m_adapterCombo->setCurrentIndex(i);
+            break;
+        }
+    }
 }
 
 void MainWindow::populateLabelCombo()
@@ -331,6 +347,29 @@ void MainWindow::onLabelComboChanged(const QString &)
     QString lbl = m_labelCombo->currentData().toString();
     if (!lbl.isEmpty())
         m_aliasEdit->clear();
+}
+
+void MainWindow::onTableContextMenu(const QPoint &pos)
+{
+    QTableWidgetItem *item = m_table->itemAt(pos);
+    if (!item) return;
+    QMenu menu;
+    QAction *copyAction = menu.addAction(QStringLiteral("Copy"));
+    if (menu.exec(m_table->viewport()->mapToGlobal(pos)) == copyAction)
+        QApplication::clipboard()->setText(item->text());
+}
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == m_table && event->type() == QEvent::KeyPress) {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        if (ke->matches(QKeySequence::Copy)) {
+            if (QTableWidgetItem *item = m_table->currentItem())
+                QApplication::clipboard()->setText(item->text());
+            return true;
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 // ---------------------------------------------------------------------------
