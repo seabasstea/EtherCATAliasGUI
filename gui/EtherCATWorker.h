@@ -14,6 +14,14 @@ struct SlaveInfo
     uint32_t revision;
     uint16_t alias;
     QString  serialNumber;
+    float    busVoltage       = 0.0f;   // 0x2060:00, V
+    uint8_t  errorRegister    = 0;      // 0x1001:00, bit flags
+    int32_t  lastError        = 0;      // 0x200F:00, error code
+    int32_t  outputPosition   = 0;      // 0x2051:00, encoder counts
+    bool     busVoltageValid      = false;
+    bool     errorRegisterValid   = false;
+    bool     lastErrorValid       = false;
+    bool     outputPositionValid  = false;
 };
 
 class EtherCATWorker : public QObject

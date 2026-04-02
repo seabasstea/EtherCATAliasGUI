@@ -119,14 +119,47 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
         // Read serial number via CoE SDO 0x26E6:0x00 (UINT32)
         si.serialNumber = QStringLiteral("No info");
         if (ctx.slavelist[i].mbx_proto & ECT_MBXPROT_COE) {
+            uint16_t idx = static_cast<uint16_t>(i);
+
             uint32_t sn = 0;
             int snSize = static_cast<int>(sizeof(sn));
-            int wkc = ecx_SDOread(&ctx, static_cast<uint16_t>(i),
-                                  0x26E6, 0x00, FALSE, &snSize, &sn, EC_TIMEOUTRXM);
+            int wkc = ecx_SDOread(&ctx, idx, 0x26E6, 0x00, FALSE, &snSize, &sn, EC_TIMEOUTRXM);
             if (wkc > 0 && !ctx.ecaterror)
                 si.serialNumber = QString::number(sn);
             else
                 ecx_elist2string(&ctx); // drain sticky error so next slave reads cleanly
+
+            // Bus Voltage — 0x2060:00, FLOAT (4 bytes)
+            float bv = 0.0f;
+            int bvSize = static_cast<int>(sizeof(bv));
+            wkc = ecx_SDOread(&ctx, idx, 0x2060, 0x00, FALSE, &bvSize, &bv, EC_TIMEOUTRXM);
+            si.busVoltageValid = (wkc > 0 && !ctx.ecaterror);
+            if (si.busVoltageValid) si.busVoltage = bv;
+            else ecx_elist2string(&ctx);
+
+            // Error Register — 0x1001:00, UINT8 (1 byte)
+            uint8_t er = 0;
+            int erSize = static_cast<int>(sizeof(er));
+            wkc = ecx_SDOread(&ctx, idx, 0x1001, 0x00, FALSE, &erSize, &er, EC_TIMEOUTRXM);
+            si.errorRegisterValid = (wkc > 0 && !ctx.ecaterror);
+            if (si.errorRegisterValid) si.errorRegister = er;
+            else ecx_elist2string(&ctx);
+
+            // Last Error — 0x200F:00, INT32 (4 bytes)
+            int32_t le = 0;
+            int leSize = static_cast<int>(sizeof(le));
+            wkc = ecx_SDOread(&ctx, idx, 0x200F, 0x00, FALSE, &leSize, &le, EC_TIMEOUTRXM);
+            si.lastErrorValid = (wkc > 0 && !ctx.ecaterror);
+            if (si.lastErrorValid) si.lastError = le;
+            else ecx_elist2string(&ctx);
+
+            // Output Position — 0x2051:00, INT32 (4 bytes)
+            int32_t op = 0;
+            int opSize = static_cast<int>(sizeof(op));
+            wkc = ecx_SDOread(&ctx, idx, 0x2051, 0x00, FALSE, &opSize, &op, EC_TIMEOUTRXM);
+            si.outputPositionValid = (wkc > 0 && !ctx.ecaterror);
+            if (si.outputPositionValid) si.outputPosition = op;
+            else ecx_elist2string(&ctx);
         }
 
         slaves.append(si);

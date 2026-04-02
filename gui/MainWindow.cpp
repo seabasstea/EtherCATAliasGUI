@@ -31,7 +31,8 @@ extern "C" {
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("EtherCAT Alias Tool"));
-    setMinimumSize(800, 550);
+    setMinimumSize(900, 550);
+    resize(1200, 620);
 
     // ---- Central widget ----
     auto *central = new QWidget(this);
@@ -43,13 +44,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // ---- Adapter row ----
     {
         auto *row = new QHBoxLayout;
+        m_refreshAdapterBtn = new QPushButton(QStringLiteral("Refresh"));
+        m_refreshAdapterBtn->setFixedWidth(70);
+        row->addWidget(m_refreshAdapterBtn);
         row->addWidget(new QLabel(QStringLiteral("Adapter:")));
         m_adapterCombo = new QComboBox;
         m_adapterCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         row->addWidget(m_adapterCombo);
-        m_refreshAdapterBtn = new QPushButton(QStringLiteral("Refresh"));
-        m_refreshAdapterBtn->setFixedWidth(70);
-        row->addWidget(m_refreshAdapterBtn);
         m_scanBtn = new QPushButton(QStringLiteral("Scan"));
         m_scanBtn->setFixedWidth(80);
         row->addWidget(m_scanBtn);
@@ -57,7 +58,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     }
 
     // ---- Slave table ----
-    m_table = new QTableWidget(0, 7);
+    m_table = new QTableWidget(0, 11);
     m_table->setHorizontalHeaderLabels({
         QStringLiteral("#"),
         QStringLiteral("Name"),
@@ -65,12 +66,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         QStringLiteral("Product Code"),
         QStringLiteral("Current Alias"),
         QStringLiteral("Matched Label"),
-        QStringLiteral("Serial Number")
+        QStringLiteral("Serial Number"),
+        QStringLiteral("Bus Voltage"),
+        QStringLiteral("Error Register"),
+        QStringLiteral("Last Error"),
+        QStringLiteral("Output Position")
     });
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_table, &QWidget::customContextMenuRequested,
@@ -310,9 +315,24 @@ void MainWindow::onSlavesScanned(QList<SlaveInfo> slaves)
         }
         m_table->setItem(row, 5, new QTableWidgetItem(matchedLabel));
         m_table->setItem(row, 6, new QTableWidgetItem(si.serialNumber));
+        m_table->setItem(row, 7, new QTableWidgetItem(
+            si.busVoltageValid
+                ? QStringLiteral("%1 V").arg(si.busVoltage, 0, 'f', 1)
+                : QStringLiteral("N/A")));
+        m_table->setItem(row, 8, new QTableWidgetItem(
+            si.errorRegisterValid
+                ? QStringLiteral("0x%1").arg(si.errorRegister, 2, 16, QLatin1Char('0'))
+                : QStringLiteral("N/A")));
+        m_table->setItem(row, 9, new QTableWidgetItem(
+            si.lastErrorValid
+                ? QString::number(si.lastError)
+                : QStringLiteral("N/A")));
+        m_table->setItem(row, 10, new QTableWidgetItem(
+            si.outputPositionValid
+                ? QString::number(si.outputPosition)
+                : QStringLiteral("N/A")));
     }
 
-    m_table->resizeColumnsToContents();
     setControlsEnabled(true);
 }
 
