@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QString>
+#include <atomic>
 #include <cstdint>
 
 struct SlaveInfo
@@ -31,12 +32,20 @@ class EtherCATWorker : public QObject
 public:
     explicit EtherCATWorker(QObject *parent = nullptr);
 
+    // Thread-safe; called from the GUI thread to cancel in-flight and queued
+    // operations (e.g. when the window closes mid-scan).
+    void requestAbort() { m_abort.store(true); }
+    void clearAbort()   { m_abort.store(false); }
+
 public slots:
-    void scanSlaves(const QString &adapterName);
+    void scanSlaves(const QString &adapterName, bool novantaDiagnostics);
     void writeAlias(const QString &adapterName, int slave, uint16_t alias);
 
 signals:
     void slavesScanned(QList<SlaveInfo> slaves);
     void aliasWritten(int slave, uint16_t alias, bool success, const QString &message);
     void logMessage(const QString &message);
+
+private:
+    std::atomic<bool> m_abort{false};
 };

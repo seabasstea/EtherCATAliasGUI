@@ -1,12 +1,18 @@
 #include "MainWindow.h"
+#include "UpdateChecker.h"
 
 extern "C" {
 #include "soem/soem.h"
 }
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
@@ -16,14 +22,17 @@ extern "C" {
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QThread>
+#include <QTimer>
 #include <QVBoxLayout>
 
 // ---------------------------------------------------------------------------
@@ -128,9 +137,16 @@ static QString errorCodeDescription(int32_t code)
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("EtherCAT Alias Tool"));
+    setWindowTitle(QStringLiteral("EtherCAT Alias Tool " APP_VERSION));
     setMinimumSize(900, 550);
     resize(1200, 620);
+
+    // ---- Menu bar ----
+    {
+        QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+        helpMenu->addAction(QStringLiteral("Check for &Updates…"), this,
+                            [this] { m_updateChecker->check(true); });
+    }
 
     // ---- Central widget ----
     auto *central = new QWidget(this);
@@ -149,6 +165,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         m_adapterCombo = new QComboBox;
         m_adapterCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         row->addWidget(m_adapterCombo);
+        m_novantaCheck = new QCheckBox(QStringLiteral("Novanta diagnostics"));
+        m_novantaCheck->setToolTip(QStringLiteral(
+            "Read Novanta drive diagnostics (serial, bus voltage, errors, position) during scans.\n"
+            "Disable for faster scans on non-Novanta networks."));
+        m_novantaCheck->setChecked(
+            QSettings().value(QStringLiteral("ui/novantaDiagnostics"), true).toBool());
+        row->addWidget(m_novantaCheck);
         m_scanBtn = new QPushButton(QStringLiteral("Scan"));
         m_scanBtn->setFixedWidth(80);
         row->addWidget(m_scanBtn);
@@ -237,6 +260,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     m_thread->start();
 
+    // ---- Update checker ----
+    m_updateChecker = new UpdateChecker(this);
+    connect(m_updateChecker, &UpdateChecker::logMessage, this, &MainWindow::onLogMessage);
+    connect(m_updateChecker, &UpdateChecker::updateAvailable,
+            this, &MainWindow::onUpdateAvailable);
+    connect(m_updateChecker, &UpdateChecker::upToDate, this, [this](bool interactive) {
+        if (interactive)
+            QMessageBox::information(this, QStringLiteral("Check for Updates"),
+                                     QStringLiteral("You are running the latest version (%1).")
+                                         .arg(QStringLiteral(APP_VERSION)));
+    });
+    QTimer::singleShot(1500, m_updateChecker, [this] { m_updateChecker->check(false); });
+
     // ---- Button connections ----
     connect(m_refreshAdapterBtn, &QPushButton::clicked, this, &MainWindow::populateAdapters);
     connect(m_scanBtn,    &QPushButton::clicked, this, &MainWindow::onScanClicked);
@@ -246,9 +282,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             this, &MainWindow::onTableSelectionChanged);
     connect(m_labelCombo, &QComboBox::currentTextChanged,
             this, &MainWindow::onLabelComboChanged);
+    connect(m_novantaCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        QSettings().setValue(QStringLiteral("ui/novantaDiagnostics"), checked);
+        applyNovantaColumns(checked);
+    });
+
+    // ---- Operation log file (same directory the crash handler writes dumps to) ----
+    {
+        const QString dir =
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        if (QDir().mkpath(dir)) {
+            const QString logPath = dir + QStringLiteral("/operations.log");
+            if (QFileInfo(logPath).size() > 512 * 1024) {
+                const QString old = dir + QStringLiteral("/operations.1.log");
+                QFile::remove(old);
+                QFile::rename(logPath, old);
+            }
+            m_logFile.setFileName(logPath);
+            m_logFile.open(QIODevice::Append | QIODevice::Text);
+        }
+    }
 
     // ---- Initial state ----
     m_writeBtn->setEnabled(false);
+    applyNovantaColumns(m_novantaCheck->isChecked());
 
     // Load default config: exe dir (dev builds, Windows install), then user
     // config dir, then the installed data dir (Linux .deb puts it in
@@ -282,8 +339,22 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
 MainWindow::~MainWindow()
 {
+    m_worker->requestAbort();
     m_thread->quit();
-    m_thread->wait();
+    if (!m_thread->wait(10000)) {
+        // A scan stuck in SOEM timeouts despite the abort flag — better to
+        // kill the thread than leave the user with a hung process.
+        m_thread->terminate();
+        m_thread->wait(2000);
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    // Let an in-flight scan bail out between slaves instead of blocking the
+    // destructor through seconds of SDO timeouts.
+    m_worker->requestAbort();
+    QMainWindow::closeEvent(event);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +374,33 @@ static bool isUsbAdapter(const QString &name, const QString &desc)
     Q_UNUSED(name);
     return desc.contains(QStringLiteral("USB"), Qt::CaseInsensitive);
 #endif
+}
+
+// Auto-selection preference: 3 = USB NIC (likely the EtherCAT dongle),
+// 2 = wired Ethernet (built-in NIC), 1 = unknown, 0 = excluded (wireless,
+// Bluetooth, virtual adapters — can't carry EtherCAT).
+static int adapterScore(const QString &name, const QString &desc)
+{
+    if (isUsbAdapter(name, desc))
+        return 3;
+#ifdef Q_OS_LINUX
+    if (name.startsWith(QStringLiteral("wl")) || name.startsWith(QStringLiteral("ww")))
+        return 0;
+    if (name.startsWith(QStringLiteral("en")) || name.startsWith(QStringLiteral("eth")))
+        return 2;
+#else
+    static const char *kExcluded[] = {
+        "wi-fi", "wifi", "wireless", "wlan", "802.11", "bluetooth",
+        "virtual", "vmware", "virtualbox", "hyper-v", "loopback",
+        "wan miniport", "tap", "tunnel", "ppp",
+    };
+    for (const char *kw : kExcluded)
+        if (desc.contains(QLatin1String(kw), Qt::CaseInsensitive))
+            return 0;
+    if (desc.contains(QStringLiteral("ethernet"), Qt::CaseInsensitive))
+        return 2;
+#endif
+    return 1;
 }
 
 void MainWindow::populateAdapters()
@@ -325,13 +423,24 @@ void MainWindow::populateAdapters()
         return;
     }
 
-    // Auto-select the first USB adapter if present
+    // Auto-select by preference: USB dongle, then built-in wired NIC.
+    int bestIndex = 0;
+    int bestScore = -1;
     for (int i = 0; i < m_adapterCombo->count(); i++) {
-        if (isUsbAdapter(m_adapterCombo->itemData(i).toString(), m_adapterCombo->itemText(i))) {
-            m_adapterCombo->setCurrentIndex(i);
-            break;
+        int score = adapterScore(m_adapterCombo->itemData(i).toString(),
+                                 m_adapterCombo->itemText(i));
+        if (score > bestScore) {
+            bestScore = score;
+            bestIndex = i;
         }
     }
+    m_adapterCombo->setCurrentIndex(bestIndex);
+
+    static const char *kScoreNames[] = { "no suitable adapter", "unrecognized type",
+                                         "built-in Ethernet", "USB NIC" };
+    onLogMessage(QStringLiteral("Auto-selected adapter: %1 (%2)")
+                     .arg(m_adapterCombo->itemText(bestIndex),
+                          QLatin1String(kScoreNames[qBound(0, bestScore, 3)])));
 }
 
 void MainWindow::populateLabelCombo()
@@ -351,19 +460,24 @@ void MainWindow::populateLabelCombo()
 void MainWindow::onScanClicked()
 {
     if (m_adapterCombo->count() == 0) return;
+    if (m_opInFlight) return;
 
+    m_opInFlight = true;
     setControlsEnabled(false);
     m_table->setRowCount(0);
     m_selectedSlave = -1;
 
     QString adapterName = selectedAdapterName();
+    m_worker->clearAbort();
     QMetaObject::invokeMethod(m_worker, "scanSlaves",
                               Qt::QueuedConnection,
-                              Q_ARG(QString, adapterName));
+                              Q_ARG(QString, adapterName),
+                              Q_ARG(bool, m_novantaCheck->isChecked()));
 }
 
 void MainWindow::onWriteAliasClicked()
 {
+    if (m_opInFlight) return;
     if (m_selectedSlave < 0) {
         QMessageBox::warning(this, QStringLiteral("No slave selected"),
                              QStringLiteral("Please select a slave in the table first."));
@@ -390,8 +504,10 @@ void MainWindow::onWriteAliasClicked()
         ok = true;
     }
 
+    m_opInFlight = true;
     setControlsEnabled(false);
     QString adapterName = selectedAdapterName();
+    m_worker->clearAbort();
     QMetaObject::invokeMethod(m_worker, "writeAlias",
                               Qt::QueuedConnection,
                               Q_ARG(QString, adapterName),
@@ -421,6 +537,7 @@ void MainWindow::onReloadConfigClicked()
 
 void MainWindow::onSlavesScanned(QList<SlaveInfo> slaves)
 {
+    m_opInFlight = false;
     m_slaves = slaves;
     m_table->setRowCount(0);
 
@@ -475,6 +592,7 @@ void MainWindow::onSlavesScanned(QList<SlaveInfo> slaves)
 
 void MainWindow::onAliasWritten(int slave, uint16_t alias, bool success, const QString &message)
 {
+    m_opInFlight = false;
     onLogMessage(message);
     setControlsEnabled(true);
 
@@ -487,6 +605,13 @@ void MainWindow::onAliasWritten(int slave, uint16_t alias, bool success, const Q
 void MainWindow::onLogMessage(const QString &message)
 {
     m_log->appendPlainText(message);
+
+    if (m_logFile.isOpen()) {
+        m_logFile.write(QStringLiteral("%1  %2\n")
+                            .arg(QDateTime::currentDateTime().toString(Qt::ISODate), message)
+                            .toUtf8());
+        m_logFile.flush();  // keep the tail intact if we crash next
+    }
 }
 
 void MainWindow::onTableSelectionChanged()
@@ -508,6 +633,33 @@ void MainWindow::onLabelComboChanged(const QString &)
     QString lbl = m_labelCombo->currentData().toString();
     if (!lbl.isEmpty())
         m_aliasEdit->clear();
+}
+
+void MainWindow::onUpdateAvailable(const QString &latestVersion, const QUrl &releaseUrl,
+                                   bool interactive)
+{
+    QSettings settings;
+    if (!interactive
+        && settings.value(QStringLiteral("updates/skippedVersion")).toString() == latestVersion)
+        return;
+
+    QMessageBox box(this);
+    box.setWindowTitle(QStringLiteral("Update Available"));
+    box.setIcon(QMessageBox::Information);
+    box.setText(QStringLiteral("Version %1 is available (you have %2).")
+                    .arg(latestVersion, QStringLiteral(APP_VERSION)));
+    box.setInformativeText(QStringLiteral("Open the download page?"));
+    QPushButton *openBtn = box.addButton(QStringLiteral("Open Download Page"),
+                                         QMessageBox::AcceptRole);
+    QPushButton *skipBtn = box.addButton(QStringLiteral("Skip This Version"),
+                                         QMessageBox::DestructiveRole);
+    box.addButton(QStringLiteral("Later"), QMessageBox::RejectRole);
+    box.exec();
+
+    if (box.clickedButton() == openBtn)
+        QDesktopServices::openUrl(releaseUrl);
+    else if (box.clickedButton() == skipBtn)
+        settings.setValue(QStringLiteral("updates/skippedVersion"), latestVersion);
 }
 
 void MainWindow::onTableContextMenu(const QPoint &pos)
@@ -540,11 +692,21 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 void MainWindow::setControlsEnabled(bool enabled)
 {
     m_scanBtn->setEnabled(enabled);
+    m_refreshAdapterBtn->setEnabled(enabled);
     m_reloadBtn->setEnabled(enabled);
     m_adapterCombo->setEnabled(enabled);
+    m_novantaCheck->setEnabled(enabled);
 
     // Write button only if slave is also selected
     m_writeBtn->setEnabled(enabled && m_selectedSlave >= 0);
+}
+
+// Columns 6-10 hold the Novanta diagnostic values (Serial Number, Bus
+// Voltage, Error Register, Last Error, Output Position).
+void MainWindow::applyNovantaColumns(bool show)
+{
+    for (int c = 6; c <= 10; c++)
+        m_table->setColumnHidden(c, !show);
 }
 
 QString MainWindow::selectedAdapterName() const

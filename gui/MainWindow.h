@@ -3,10 +3,15 @@
 #include "AliasConfig.h"
 #include "EtherCATWorker.h"
 
+#include <QFile>
 #include <QMainWindow>
 #include <QList>
+#include <QUrl>
 
+class QCheckBox;
+class QCloseEvent;
 class QComboBox;
+class UpdateChecker;
 class QPushButton;
 class QTableWidget;
 class QPlainTextEdit;
@@ -31,20 +36,24 @@ private slots:
     void onTableSelectionChanged();
     void onLabelComboChanged(const QString &label);
     void onTableContextMenu(const QPoint &pos);
+    void onUpdateAvailable(const QString &latestVersion, const QUrl &releaseUrl, bool interactive);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
 
 private:
     void populateAdapters();
     void populateLabelCombo();
     void setControlsEnabled(bool enabled);
+    void applyNovantaColumns(bool show);
     QString selectedAdapterName() const;
 
     // Widgets
     QComboBox      *m_adapterCombo      = nullptr;
     QPushButton    *m_refreshAdapterBtn = nullptr;
     QPushButton    *m_scanBtn           = nullptr;
+    QCheckBox      *m_novantaCheck      = nullptr;
     QTableWidget   *m_table         = nullptr;
     QComboBox      *m_labelCombo    = nullptr;
     QLineEdit      *m_aliasEdit     = nullptr;
@@ -56,10 +65,17 @@ private:
     QThread          *m_thread  = nullptr;
     EtherCATWorker   *m_worker  = nullptr;
 
+    // Updates
+    UpdateChecker *m_updateChecker = nullptr;
+
     // Config
     AliasConfig m_config;
 
     // State
     QList<SlaveInfo> m_slaves;
     int m_selectedSlave = -1;
+    bool m_opInFlight = false;
+
+    // Persistent operation log (for diagnosing field crashes)
+    QFile m_logFile;
 };

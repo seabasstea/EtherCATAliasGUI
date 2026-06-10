@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 if(Qt6_VERSION VERSION_GREATER_EQUAL 6.3)
     qt_standard_project_setup()
 else()
@@ -17,6 +17,10 @@ set(SOURCES
     EtherCATWorker.cpp
     AliasConfig.h
     AliasConfig.cpp
+    UpdateChecker.h
+    UpdateChecker.cpp
+    CrashHandler.h
+    CrashHandler.cpp
     app.qrc
 )
 
@@ -27,7 +31,13 @@ if(WIN32)
     set_source_files_properties(app.rc PROPERTIES SKIP_AUTOMOC TRUE SKIP_AUTOUIC TRUE)
 endif()
 
-target_link_libraries(EtherCATAliasGUI PRIVATE soem Qt6::Widgets)
+target_link_libraries(EtherCATAliasGUI PRIVATE soem Qt6::Widgets Qt6::Network)
+target_compile_definitions(EtherCATAliasGUI PRIVATE APP_VERSION="${PROJECT_VERSION}")
+
+# dbghelp provides MiniDumpWriteDump for the crash handler
+if(WIN32)
+    target_link_libraries(EtherCATAliasGUI PRIVATE dbghelp)
+endif()
 
 # Copy alias_config.json next to the executable at build time
 add_custom_command(TARGET EtherCATAliasGUI POST_BUILD

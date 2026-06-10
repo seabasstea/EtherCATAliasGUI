@@ -131,3 +131,7 @@ Edit this file directly to add or change labels, then click **Reload Config…**
 4. Pick a label from the **From config** dropdown, or type a decimal alias value manually.
 5. Click **Write Alias to Selected Slave**.
 6. Power-cycle the slave for the new alias to take effect.
+
+## CI & Releases
+
+Every push and pull request builds both the Windows installer and the Ubuntu .deb via GitHub Actions; the packages are attached to the workflow run as artifacts. Pushing a tag `vX.Y` publishes a GitHub Release with the Windows installer and the Ubuntu .deb. Tags containing a dash (e.g. `v1.2-rc1`) publish as pre-releases, which the in-app update check ignores. The app checks for updates on launch and via **Help → Check for Updates**.

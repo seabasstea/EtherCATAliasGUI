@@ -5,6 +5,8 @@ extern "C" {
 }
 
 #include <cstring>
+#include <memory>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Internal helpers (mirrors eepromtool.c logic)
@@ -79,12 +81,20 @@ static bool eepromRead(ecx_contextt &ctx, int slave, int start, int length,
 
 EtherCATWorker::EtherCATWorker(QObject *parent) : QObject(parent) {}
 
-void EtherCATWorker::scanSlaves(const QString &adapterName)
+void EtherCATWorker::scanSlaves(const QString &adapterName, bool novantaDiagnostics)
 {
+    if (m_abort.load()) {
+        emit slavesScanned({});
+        return;
+    }
+
     emit logMessage(QStringLiteral("Scanning on %1…").arg(adapterName));
 
-    ecx_contextt ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    // ecx_contextt embeds the full slave list, packet buffers and mailbox pool
+    // (hundreds of KB) — too big for the worker thread's stack.
+    auto ctxOwner = std::make_unique<ecx_contextt>();
+    memset(ctxOwner.get(), 0, sizeof(ecx_contextt));
+    ecx_contextt &ctx = *ctxOwner;
 
     QByteArray ifName = adapterName.toLocal8Bit();
 
@@ -103,8 +113,10 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
 
     // Configure sync managers and mailboxes (required for CoE SDO access).
     // We do NOT wait for SAFE_OP — PRE_OP is sufficient for SDO reads.
-    static uint8_t IOmap[4096];
-    ecx_config_map_group(&ctx, IOmap, 0);
+    // ecx_config_map_group does not bounds-check the IO map; size it far
+    // beyond what any realistic slave count can produce.
+    std::vector<uint8_t> ioMap(65536, 0);
+    ecx_config_map_group(&ctx, ioMap.data(), 0);
 
     // Read slave info
     static const int EEPBUFSIZE = 128;
@@ -112,6 +124,13 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
 
     QList<SlaveInfo> slaves;
     for (int i = 1; i <= ctx.slavecount; i++) {
+        if (m_abort.load()) {
+            emit logMessage(QStringLiteral("Scan aborted."));
+            ecx_close(&ctx);
+            emit slavesScanned(slaves);
+            return;
+        }
+
         SlaveInfo si;
         si.pos      = i;
         si.name     = QString::fromLocal8Bit(ctx.slavelist[i].name);
@@ -129,7 +148,7 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
 
         // Read serial number via CoE SDO 0x26E6:0x00 (UINT32)
         si.serialNumber = QStringLiteral("No info");
-        if (ctx.slavelist[i].mbx_proto & ECT_MBXPROT_COE) {
+        if (novantaDiagnostics && (ctx.slavelist[i].mbx_proto & ECT_MBXPROT_COE)) {
             uint16_t idx = static_cast<uint16_t>(i);
 
             uint32_t sn = 0;
@@ -183,12 +202,18 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
 
 void EtherCATWorker::writeAlias(const QString &adapterName, int slave, uint16_t alias)
 {
+    if (m_abort.load()) {
+        emit aliasWritten(slave, alias, false, QStringLiteral("Write cancelled."));
+        return;
+    }
+
     emit logMessage(QStringLiteral("Writing alias %1 to slave %2…")
                         .arg(alias)
                         .arg(slave));
 
-    ecx_contextt ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    auto ctxOwner = std::make_unique<ecx_contextt>();
+    memset(ctxOwner.get(), 0, sizeof(ecx_contextt));
+    ecx_contextt &ctx = *ctxOwner;
 
     QByteArray ifName = adapterName.toLocal8Bit();
 
