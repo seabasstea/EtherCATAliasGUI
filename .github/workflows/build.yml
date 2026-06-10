@@ -31,6 +31,11 @@ jobs:
           arch: 'win64_mingw'
           tools: 'tools_mingw1310,qt.tools.win64_mingw1310'
           aqtversion: '==3.3.*'
+          # Only what the build needs: qtbase (Widgets/Network), qttools
+          # (windeployqt), and the GL/D3D DLLs the deploy script bundles.
+          # Cuts the download from ~1.5 GB to ~200 MB — full installs have
+          # hung CI for an hour on slow Qt mirrors.
+          archives: 'qtbase qttools opengl32sw d3dcompiler_47'
           cache: true
 
       - name: Configure
