@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource>
+        <file alias="ethercat-alias-tool.png">packaging/ethercat-alias-tool.png</file>
+    </qresource>
+</RCC>

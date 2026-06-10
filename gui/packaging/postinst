@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+# Grant raw-socket capabilities so the tool runs without root.
+# dpkg strips file capabilities whenever it rewrites the binary, so this
+# must re-run on every install/upgrade ("configure" step).
+if [ "$1" = "configure" ]; then
+    setcap cap_net_raw,cap_net_admin+ep /usr/bin/EtherCATAliasGUI \
+        || echo "WARNING: setcap failed; run EtherCATAliasGUI as root or set capabilities manually." >&2
+fi

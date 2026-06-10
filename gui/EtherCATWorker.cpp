@@ -10,6 +10,17 @@ extern "C" {
 // Internal helpers (mirrors eepromtool.c logic)
 // ---------------------------------------------------------------------------
 
+// Platform-appropriate hint for why opening a raw socket on the adapter failed.
+static QString openAdapterHint()
+{
+#ifdef Q_OS_WIN
+    return QStringLiteral("Run as Administrator?");
+#else
+    return QStringLiteral("Missing CAP_NET_RAW capability? Reinstall the package or run: "
+                          "sudo setcap cap_net_raw,cap_net_admin+ep $(command -v EtherCATAliasGUI)");
+#endif
+}
+
 static void calc_crc(uint8_t *crc, uint8_t b)
 {
     *crc ^= b;
@@ -78,7 +89,7 @@ void EtherCATWorker::scanSlaves(const QString &adapterName)
     QByteArray ifName = adapterName.toLocal8Bit();
 
     if (!ecx_init(&ctx, ifName.data())) {
-        emit logMessage(QStringLiteral("Failed to open adapter %1. Run as Administrator?").arg(adapterName));
+        emit logMessage(QStringLiteral("Failed to open adapter %1. %2").arg(adapterName, openAdapterHint()));
         emit slavesScanned({});
         return;
     }
@@ -183,7 +194,7 @@ void EtherCATWorker::writeAlias(const QString &adapterName, int slave, uint16_t 
 
     if (!ecx_init(&ctx, ifName.data())) {
         emit aliasWritten(slave, alias, false,
-                          QStringLiteral("Failed to open adapter. Run as Administrator?"));
+                          QStringLiteral("Failed to open adapter. %1").arg(openAdapterHint()));
         return;
     }
 

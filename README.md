@@ -1,6 +1,6 @@
 # EtherCAT Alias Tool
 
-A Windows GUI application for discovering EtherCAT slaves, reading their current aliases, and writing new aliases to their EEPROM. Built with C++17, Qt 6, and [SOEM](https://github.com/OpenEtherCATsociety/SOEM).
+A GUI application for Windows and Ubuntu Linux for discovering EtherCAT slaves, reading their current aliases, and writing new aliases to their EEPROM. Built with C++17, Qt 6, and [SOEM](https://github.com/OpenEtherCATsociety/SOEM).
 
 ## Features
 
@@ -12,12 +12,27 @@ A Windows GUI application for discovering EtherCAT slaves, reading their current
 
 ## Prerequisites
 
+### Windows
+
 | Dependency | Notes |
 |---|---|
 | [Qt 6](https://www.qt.io/download) | Install with the MinGW 64-bit component |
 | [Npcap](https://npcap.com/) | Required for raw Ethernet socket access on Windows. Install with "WinPcap API-compatible mode" enabled. |
-| CMake ≥ 3.16 | Included with Qt installer under `Tools/CMake_64` |
+| CMake ≥ 3.28 | Included with Qt installer under `Tools/CMake_64` |
 | Ninja | Included with Qt installer under `Tools/Ninja` |
+
+### Ubuntu (22.04 or newer)
+
+```bash
+sudo apt-get install build-essential ninja-build qt6-base-dev libgl1-mesa-dev dpkg-dev
+sudo snap install cmake --classic
+```
+
+Notes:
+
+- The SOEM submodule requires **CMake ≥ 3.28**; Ubuntu 22.04's archive version is 3.22, hence the snap (the [Kitware APT repository](https://apt.kitware.com/) works too). On 24.04+ the archive `cmake` package is recent enough.
+- `libgl1-mesa-dev` is needed on 22.04 because Qt 6's CMake config requires OpenGL headers that `qt6-base-dev` does not pull in.
+- No Npcap/libpcap equivalent is needed on Linux — SOEM uses raw `AF_PACKET` sockets directly.
 
 ## Cloning
 
@@ -34,6 +49,8 @@ git submodule update --init
 ```
 
 ## Building
+
+### Windows
 
 Replace `<Qt6-install-path>` with your Qt 6 MinGW installation directory (e.g. `C:/Qt/6.11.0/mingw_64`) and `<MinGW-path>` with the matching MinGW toolchain (e.g. `C:/Qt/Tools/mingw1310_64`).
 
@@ -53,13 +70,44 @@ The executable and all required Qt DLLs will be placed in `build/gui/`.
 
 > **Note:** Add `<MinGW-path>/bin` to your `PATH` before running cmake if the compiler test fails.
 
+### Ubuntu
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+The executable is placed in `build/gui/EtherCATAliasGUI`.
+
+### Building the .deb package (Ubuntu)
+
+```bash
+cpack --config build/CPackConfig.cmake -B build
+sudo apt install ./build/ethercat-alias-tool_*.deb
+```
+
+The package installs the binary to `/usr/bin`, the alias config to `/usr/share/ethercat-alias-tool/`, and a desktop launcher. Its `postinst` grants the binary `cap_net_raw`/`cap_net_admin` capabilities, so no sudo is needed to run the installed tool.
+
 ## Running
+
+### Windows
 
 Raw Ethernet access requires Administrator privileges. Right-click the executable and select **Run as administrator**, or from an elevated terminal:
 
 ```powershell
 Start-Process -Verb RunAs build\gui\EtherCATAliasGUI.exe
 ```
+
+### Ubuntu
+
+If installed from the .deb, launch **EtherCAT Alias Tool** from the application menu or run `EtherCATAliasGUI` — the package's capability grant covers raw socket access. For a locally built (uninstalled) binary, either grant it the capabilities once:
+
+```bash
+sudo setcap cap_net_raw,cap_net_admin+ep build/gui/EtherCATAliasGUI
+build/gui/EtherCATAliasGUI
+```
+
+or run it with `sudo`.
 
 ## Alias Configuration
 

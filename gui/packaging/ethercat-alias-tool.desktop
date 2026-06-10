@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=EtherCAT Alias Tool
+Comment=EtherCAT Alias Configuration Tool
+Exec=/usr/bin/EtherCATAliasGUI
+Icon=ethercat-alias-tool
+Terminal=false
+Categories=Utility;HardwareSettings;
+StartupWMClass=EtherCATAliasGUI

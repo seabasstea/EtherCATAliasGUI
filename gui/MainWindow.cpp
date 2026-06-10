@@ -8,6 +8,7 @@ extern "C" {
 #include <QClipboard>
 #include <QComboBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,6 +21,7 @@ extern "C" {
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
+#include <QStandardPaths>
 #include <QTableWidget>
 #include <QThread>
 #include <QVBoxLayout>
@@ -248,14 +250,32 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // ---- Initial state ----
     m_writeBtn->setEnabled(false);
 
-    // Load default config from next to executable
-    QString defaultConfig = QApplication::applicationDirPath() + QStringLiteral("/MK2_alias_config.json");
-    if (m_config.load(defaultConfig)) {
-        populateLabelCombo();
-        onLogMessage(QStringLiteral("Loaded config: %1").arg(defaultConfig));
-    } else {
-        onLogMessage(QStringLiteral("No MK2_alias_config.json found at %1").arg(defaultConfig));
+    // Load default config: exe dir (dev builds, Windows install), then user
+    // config dir, then the installed data dir (Linux .deb puts it in
+    // <prefix>/share/ethercat-alias-tool next to <prefix>/bin).
+    const QStringList configCandidates = {
+        QApplication::applicationDirPath() + QStringLiteral("/MK2_alias_config.json"),
+        QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+            + QStringLiteral("/MK2_alias_config.json"),
+        QApplication::applicationDirPath()
+            + QStringLiteral("/../share/ethercat-alias-tool/MK2_alias_config.json"),
+    };
+    bool configLoaded = false;
+    for (const QString &candidate : configCandidates) {
+        if (!QFileInfo::exists(candidate))
+            continue;
+        if (m_config.load(candidate)) {
+            populateLabelCombo();
+            onLogMessage(QStringLiteral("Loaded config: %1").arg(candidate));
+            configLoaded = true;
+        } else {
+            onLogMessage(QStringLiteral("Could not parse %1 — fix or remove it.").arg(candidate));
+        }
+        break;  // don't silently fall back to a lower-priority config
     }
+    if (!configLoaded)
+        onLogMessage(QStringLiteral("No MK2_alias_config.json found (searched: %1)")
+                         .arg(configCandidates.join(QStringLiteral(", "))));
 
     populateAdapters();
 }
@@ -270,6 +290,21 @@ MainWindow::~MainWindow()
 // Adapter list (called on main thread — ec_find_adapters doesn't need a socket)
 // ---------------------------------------------------------------------------
 
+// Whether an adapter is a USB NIC — the preferred choice for auto-selection.
+static bool isUsbAdapter(const QString &name, const QString &desc)
+{
+#ifdef Q_OS_LINUX
+    // Linux adapter names are bare interface names (enx*, enp*, ...); resolve
+    // the device symlink in sysfs to see whether it hangs off a USB bus.
+    return QFileInfo(QStringLiteral("/sys/class/net/%1/device").arg(name))
+        .canonicalFilePath()
+        .contains(QStringLiteral("/usb"));
+#else
+    Q_UNUSED(name);
+    return desc.contains(QStringLiteral("USB"), Qt::CaseInsensitive);
+#endif
+}
+
 void MainWindow::populateAdapters()
 {
     m_adapterCombo->clear();
@@ -277,9 +312,10 @@ void MainWindow::populateAdapters()
     ec_adaptert *head = ec_find_adapters();
     ec_adaptert *a = head;
     while (a) {
-        m_adapterCombo->addItem(
-            QString::fromLocal8Bit(a->desc),
-            QString::fromLocal8Bit(a->name));
+        QString name = QString::fromLocal8Bit(a->name);
+        QString desc = QString::fromLocal8Bit(a->desc);
+        if (name != QStringLiteral("lo"))   // loopback can't carry EtherCAT
+            m_adapterCombo->addItem(desc, name);
         a = a->next;
     }
     ec_free_adapters(head);
@@ -291,7 +327,7 @@ void MainWindow::populateAdapters()
 
     // Auto-select the first USB adapter if present
     for (int i = 0; i < m_adapterCombo->count(); i++) {
-        if (m_adapterCombo->itemText(i).contains(QStringLiteral("USB"), Qt::CaseInsensitive)) {
+        if (isUsbAdapter(m_adapterCombo->itemData(i).toString(), m_adapterCombo->itemText(i))) {
             m_adapterCombo->setCurrentIndex(i);
             break;
         }
