@@ -62,6 +62,9 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
       - name: Package (NSIS installer)
         run: cmake --build build --target package
 
