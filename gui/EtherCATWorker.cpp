@@ -57,7 +57,9 @@ static bool eepromRead(ecx_contextt &ctx, int slave, int start, int length,
     ecx_APWR(&ctx.port, aiadr, ECT_REG_EEPCFG, sizeof(eepctl), &eepctl, EC_TIMEOUTRET);
 
     uint16_t estat = 0;
-    ecx_APRD(&ctx.port, aiadr, ECT_REG_EEPSTAT, sizeof(estat), &estat, EC_TIMEOUTRET);
+    int wkc = ecx_APRD(&ctx.port, aiadr, ECT_REG_EEPSTAT, sizeof(estat), &estat, EC_TIMEOUTRET);
+    if (wkc <= 0) // no response from the slave at all
+        return false;
     estat = etohs(estat);
 
     if (estat & EC_ESTAT_R64) {
@@ -245,8 +247,21 @@ void EtherCATWorker::writeAlias(const QString &adapterName, int slave, uint16_t 
         return;
     }
 
-    // Update alias word (0x04) in local buffer for CRC calculation
+    // The per-word EEPROM reads have no error channel — a dropped frame yields
+    // zeros that look like data. Every healthy slave's SII words 0x00–0x06 must
+    // checksum-match word 0x07 (the ESC enforces this at power-on), so use that
+    // to validate the buffer before deriving a new CRC from it. Writing a CRC
+    // computed from a corrupted read would invalidate the slave's SII.
     uint16_t *wbuf = reinterpret_cast<uint16_t *>(ebuf);
+    if (static_cast<uint8_t>(SIIcrc(ebuf)) != static_cast<uint8_t>(wbuf[0x07])) {
+        ecx_close(&ctx);
+        emit aliasWritten(slave, alias, false,
+                          QStringLiteral("EEPROM read of slave %1 failed verification "
+                                         "(SII checksum mismatch) — write aborted.").arg(slave));
+        return;
+    }
+
+    // Update alias word (0x04) in local buffer for CRC calculation
     wbuf[0x04] = alias;
 
     uint16_t crc = SIIcrc(ebuf);
@@ -262,14 +277,27 @@ void EtherCATWorker::writeAlias(const QString &adapterName, int slave, uint16_t 
     if (ret)
         ret = ecx_writeeepromAP(&ctx, aiadr, 0x07, crc, EC_TIMEOUTEEP);
 
+    // Read back both words to confirm the EEPROM actually took the new values.
+    bool verified = false;
+    if (ret) {
+        memset(ebuf, 0, CRCBUFSIZE);
+        verified = eepromRead(ctx, slave, 0, CRCBUFSIZE, ebuf, CRCBUFSIZE)
+                   && wbuf[0x04] == alias
+                   && static_cast<uint8_t>(wbuf[0x07]) == static_cast<uint8_t>(crc);
+    }
+
     ecx_close(&ctx);
 
-    if (ret) {
+    if (ret && verified) {
         emit aliasWritten(slave, alias, true,
-                          QStringLiteral("Alias %1 written to slave %2 (CRC=0x%3).")
+                          QStringLiteral("Alias %1 written to slave %2 and verified (CRC=0x%3).")
                               .arg(alias)
                               .arg(slave)
                               .arg(crc, 4, 16, QLatin1Char('0')));
+    } else if (ret) {
+        emit aliasWritten(slave, alias, false,
+                          QStringLiteral("Alias write to slave %1 could not be verified by "
+                                         "read-back — re-scan to check the slave's state.").arg(slave));
     } else {
         emit aliasWritten(slave, alias, false,
                           QStringLiteral("EEPROM write failed for slave %1.").arg(slave));

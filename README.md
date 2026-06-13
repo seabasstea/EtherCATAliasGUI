@@ -9,6 +9,8 @@ A GUI application for Windows and Ubuntu Linux for discovering EtherCAT slaves, 
 - Reads the current alias from each slave's EEPROM
 - Writes a new alias from a user-editable JSON label dictionary or a manually entered value
 - Automatically recalculates the EEPROM CRC after writing
+- Optional Novanta drive diagnostics during scans (serial number, bus voltage, error codes, position)
+- Checks for updates on launch and via **Help → Check for Updates**
 
 ## Prerequisites
 
@@ -126,11 +128,12 @@ Edit this file directly to add or change labels, then click **Reload Config…**
 ## Usage
 
 1. Select a network adapter from the dropdown.
-2. Click **Scan** to discover slaves.
-3. Select a slave in the table.
-4. Pick a label from the **From config** dropdown, or type a decimal alias value manually.
-5. Click **Write Alias to Selected Slave**.
-6. Power-cycle the slave for the new alias to take effect.
+2. Optionally toggle **Novanta diagnostics** — when enabled, scans also read Novanta drive diagnostics (serial, bus voltage, errors, position) and show the extra columns; disable it for faster scans on non-Novanta networks.
+3. Click **Scan** to discover slaves.
+4. Select a slave in the table.
+5. Pick a label from the **From config** dropdown, or type a decimal alias value manually.
+6. Click **Write Alias to Selected Slave**.
+7. Power-cycle the slave for the new alias to take effect.
 
 ## CI & Releases
 

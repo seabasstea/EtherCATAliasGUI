@@ -508,11 +508,14 @@ void MainWindow::onWriteAliasClicked()
     setControlsEnabled(false);
     QString adapterName = selectedAdapterName();
     m_worker->clearAbort();
-    QMetaObject::invokeMethod(m_worker, "writeAlias",
-                              Qt::QueuedConnection,
-                              Q_ARG(QString, adapterName),
-                              Q_ARG(int, m_selectedSlave),
-                              Q_ARG(uint16_t, alias));
+    // Lambda instead of the string-based overload: Qt 6.2 (Ubuntu 22.04) cannot
+    // resolve the metatype name "uint16_t" and silently drops the queued call.
+    QMetaObject::invokeMethod(
+        m_worker,
+        [worker = m_worker, adapterName, slave = m_selectedSlave, alias]() {
+            worker->writeAlias(adapterName, slave, alias);
+        },
+        Qt::QueuedConnection);
 }
 
 void MainWindow::onReloadConfigClicked()
