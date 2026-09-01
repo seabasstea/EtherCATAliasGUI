@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 # CI overrides this from the git tag (v1.2 -> -DAPP_VERSION=1.2) so release
 # artifacts and the in-app update check always match the tag.
-set(APP_VERSION "1.1" CACHE STRING "Application version")
+set(APP_VERSION "1.3" CACHE STRING "Application version")
 project(EtherCATAliasGUI VERSION ${APP_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
