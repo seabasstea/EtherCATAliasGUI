@@ -50,6 +50,12 @@ If you already cloned without `--recurse-submodules`:
 git submodule update --init
 ```
 
+Configure then applies `patches/` to the `SOEM` checkout — a NULL-deref in
+`ecx_mbxreceive` that crashes any CoE read against a faulted drive (i.e. a scan
+with Novanta diagnostics enabled), not yet fixed upstream. See
+`patches/README.md`. This means **`git` must be on `PATH`** to configure;
+re-running configure is a no-op.
+
 ## Building
 
 ### Windows

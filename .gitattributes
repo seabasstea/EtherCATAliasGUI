@@ -1,0 +1,3 @@
+# The SOEM patches are applied with `git apply` at configure time; keep them
+# LF on every platform so a Windows checkout (core.autocrlf=true) still applies.
+patches/*.patch -text

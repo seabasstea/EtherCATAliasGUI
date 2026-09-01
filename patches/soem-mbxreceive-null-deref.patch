@@ -1,0 +1,35 @@
+diff --git a/src/ec_main.c b/src/ec_main.c
+index c8d0335..dd31cf1 100644
+--- a/src/ec_main.c
++++ b/src/ec_main.c
+@@ -1671,10 +1671,28 @@ int ecx_mbxreceive(ecx_contextt *context, uint16 slave, ec_mbxbuft **mbx, int ti
+       if ((wkc > 0) && ((SMstat & 0x08) > 0)) /* read mailbox available ? */
+       {
+          mbxro = slavelist->mbx_ro;
+-         mbxin = ecx_getmbx(context);
+-         mbxh = (ec_mbxheadert *)mbxin;
++         mbxin = NULL;
++         mbxh = NULL;
+          do
+          {
++            /* Local fix, not upstream as of SOEM b410bf6: the mailbox buffer
++               has to be re-acquired on every pass. This loop repeats while
++               wkc <= 0, and the mailbox-error and CoE-emergency branches below
++               hand the buffer back to the pool and set wkc = 0 -- upstream then
++               reads the next mailbox into a NULL mbxin and segfaults inside
++               ecx_FPRD(). The pool-exhausted check matches upstream PR #976,
++               which guards only the original pre-loop ecx_getmbx(). */
++            if (mbxin == NULL)
++            {
++               mbxin = ecx_getmbx(context);
++               if (mbxin == NULL) /* mailbox pool exhausted */
++               {
++                  *mbx = NULL;
++                  wkc = 0;
++                  break;
++               }
++               mbxh = (ec_mbxheadert *)mbxin;
++            }
+             wkc = ecx_FPRD(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTRET); /* get mailbox */
+             if ((wkc > 0) && ((mbxh->mbxtype & 0x0f) == 0x00))                            /* Mailbox error response? */
+             {

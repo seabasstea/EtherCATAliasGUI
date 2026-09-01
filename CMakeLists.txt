@@ -8,6 +8,34 @@ project(EtherCATAliasGUI VERSION ${APP_VERSION} LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ---- Vendored SOEM ----
+# ecx_mbxreceive() dereferences a NULL mailbox pointer whenever a slave answers
+# with a CoE Emergency or a mailbox error -- which is every CoE read against a
+# faulted drive, i.e. any scan with Novanta diagnostics enabled on a bus that
+# has one. Still unfixed upstream, so patch the submodule checkout here, before
+# it is built. Re-configuring is a no-op; a patch that no longer applies is a
+# hard error rather than a silently unpatched (crashing) binary.
+# See patches/README.md.
+find_package(Git REQUIRED)
+set(SOEM_PATCH ${CMAKE_CURRENT_SOURCE_DIR}/patches/soem-mbxreceive-null-deref.patch)
+execute_process(
+    COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${SOEM_PATCH}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/SOEM
+    RESULT_VARIABLE soem_patch_present OUTPUT_QUIET ERROR_QUIET)
+if(soem_patch_present EQUAL 0)
+    message(STATUS "SOEM: mbxreceive NULL-deref patch already applied")
+else()
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} apply ${SOEM_PATCH}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/SOEM
+        RESULT_VARIABLE soem_patch_rc ERROR_VARIABLE soem_patch_err)
+    if(NOT soem_patch_rc EQUAL 0)
+        message(FATAL_ERROR "Could not apply ${SOEM_PATCH} to SOEM/ "
+                            "(submodule checked out? patch stale after a bump?):\n${soem_patch_err}")
+    endif()
+    message(STATUS "SOEM: applied mbxreceive NULL-deref patch")
+endif()
+
 add_subdirectory(SOEM)
 add_subdirectory(gui)
 
