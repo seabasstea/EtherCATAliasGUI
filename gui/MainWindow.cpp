@@ -376,11 +376,27 @@ static bool isUsbAdapter(const QString &name, const QString &desc)
 #endif
 }
 
-// Auto-selection preference: 3 = USB NIC (likely the EtherCAT dongle),
-// 2 = wired Ethernet (built-in NIC), 1 = unknown, 0 = excluded (wireless,
-// Bluetooth, virtual adapters — can't carry EtherCAT).
+// True for ecat0, ecat1, ... — the names udev gives the EtherCAT ports on the
+// robot, so the name is a deliberate marker rather than a guess. Linux only:
+// on Windows SOEM reports adapter names as NPF device paths, not interface names.
+static bool isEtherCatNamed(const QString &name)
+{
+    if (!name.startsWith(QStringLiteral("ecat")) || name.size() == 4)
+        return false;
+    for (int i = 4; i < name.size(); i++)
+        if (!name.at(i).isDigit())
+            return false;
+    return true;
+}
+
+// Auto-selection preference: 4 = EtherCAT NIC (a udev-renamed ecatN port),
+// 3 = USB NIC (likely the EtherCAT dongle), 2 = wired Ethernet (built-in NIC),
+// 1 = unknown, 0 = excluded (wireless, Bluetooth, virtual adapters — can't
+// carry EtherCAT).
 static int adapterScore(const QString &name, const QString &desc)
 {
+    if (isEtherCatNamed(name))
+        return 4; // renamed for EtherCAT by udev — the strongest signal there is
     if (isUsbAdapter(name, desc))
         return 3;
 #ifdef Q_OS_LINUX
@@ -423,7 +439,8 @@ void MainWindow::populateAdapters()
         return;
     }
 
-    // Auto-select by preference: USB dongle, then built-in wired NIC.
+    // Auto-select by preference: the robot's EtherCAT port if this machine has
+    // one, else the best-scoring NIC (USB dongle, then built-in wired NIC).
     int bestIndex = 0;
     int bestScore = -1;
     for (int i = 0; i < m_adapterCombo->count(); i++) {
@@ -434,13 +451,31 @@ void MainWindow::populateAdapters()
             bestIndex = i;
         }
     }
+    // The port is udev-renamed to ecat0 on some robot builds and ecat1 on
+    // others. Take the names in order so ecat0 still wins on a box that has
+    // both, whatever order SOEM enumerated them in.
+    for (const char *want : { "ecat0", "ecat1" }) {
+        int found = -1;
+        for (int i = 0; i < m_adapterCombo->count(); i++) {
+            if (m_adapterCombo->itemData(i).toString() == QLatin1String(want)) {
+                found = i;
+                break;
+            }
+        }
+        if (found >= 0) {
+            bestIndex = found;
+            bestScore = adapterScore(m_adapterCombo->itemData(found).toString(),
+                                     m_adapterCombo->itemText(found));
+            break;
+        }
+    }
     m_adapterCombo->setCurrentIndex(bestIndex);
 
     static const char *kScoreNames[] = { "no suitable adapter", "unrecognized type",
-                                         "built-in Ethernet", "USB NIC" };
+                                         "built-in Ethernet", "USB NIC", "EtherCAT NIC" };
     onLogMessage(QStringLiteral("Auto-selected adapter: %1 (%2)")
                      .arg(m_adapterCombo->itemText(bestIndex),
-                          QLatin1String(kScoreNames[qBound(0, bestScore, 3)])));
+                          QLatin1String(kScoreNames[qBound(0, bestScore, 4)])));
 }
 
 void MainWindow::populateLabelCombo()

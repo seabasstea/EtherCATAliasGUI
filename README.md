@@ -4,7 +4,7 @@ A GUI application for Windows and Ubuntu Linux for discovering EtherCAT slaves, 
 
 ## Features
 
-- Lists available network adapters
+- Lists available network adapters and auto-selects the likely one (prefers the robot’s `ecat0`/`ecat1` port, otherwise the best-scoring NIC)
 - Scans and displays all EtherCAT slaves (name, vendor ID, product code, current alias, serial number)
 - Reads the current alias from each slave's EEPROM
 - Writes a new alias from a user-editable JSON label dictionary or a manually entered value
